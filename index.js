@@ -448,7 +448,6 @@ class LocalStorageDb {
 
             while (tables.length > 1) {
                 // take the second table and merge it into the first according to the join rules
-                console.log(tables[1].from.join);
                 switch(tables[1].from.join) {
                     case 'INNER JOIN':
                        {
