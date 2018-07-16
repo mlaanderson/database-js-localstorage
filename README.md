@@ -1,4 +1,4 @@
-# database-js-firebase
+# database-js-localstorage
 [![Build Status](https://travis-ci.org/mlaanderson/database-js-localstorage.svg?branch=master)](https://travis-ci.org/mlaanderson/database-js-localstorage)
 
 Database-js interface for Web Browser Local Storage
