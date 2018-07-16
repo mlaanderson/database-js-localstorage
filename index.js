@@ -267,6 +267,7 @@ class LocalStorageDb {
             for (let col of sqlObj.columns) {
                 let name = col.as || (namespace ? col.expr.table + "." + col.expr.column : col.expr.column);
                 result[name] = row[namespace ? col.expr.table + "." + col.expr.column : col.expr.column];
+                if (result[name] === undefined) result[name] = null;
             }
             data.push(result);
         }
@@ -386,10 +387,9 @@ class LocalStorageDb {
         let result = [];
         
         rows = rows.filter(row => this.doWhere(sqlobj.where, row, namespace));
-        rows.map(row => this.chooseFields(sqlobj, result, row, namespace));
 
         if (sqlobj.orderby) {
-            result.sort((a, b) => {
+            rows.sort((a, b) => {
                 for (let orderer of sqlobj.orderby) {
                     let column = namespace ? orderer.expr.table + "." + orderer.expr.column : orderer.expr.column;
                     if (orderer.expr.type !== 'column_ref') {
@@ -406,6 +406,8 @@ class LocalStorageDb {
                 return 0;
             });
         }
+
+        rows.map(row => this.chooseFields(sqlobj, result, row, namespace));
 
         if (sqlobj.limit) {
             if (sqlobj.limit.length !== 2) {
@@ -424,7 +426,7 @@ class LocalStorageDb {
      *      INNER: intersection of the two tables
      *      LEFT: first table plus second table or null
      *      RIGHT: second table plus first table or null
-     *      FULL: both tables, null outside the intersection
+     *      FULL: both tables, null outside the intersection - apparently unsupported in sql parser
      */
     doSelect(sqlobj) {
         if (sqlobj.from.length == 1) {
@@ -446,23 +448,118 @@ class LocalStorageDb {
 
             while (tables.length > 1) {
                 // take the second table and merge it into the first according to the join rules
+                console.log(tables[1].from.join);
                 switch(tables[1].from.join) {
                     case 'INNER JOIN':
-                        // keep only the matches
-                        var rows = [];
+                       {
+                            // keep only the matches
+                            var rows = [];
 
-                        for (let row0 of tables[0].rows) {
-                            for (let row1 of tables[1].rows) {
-                                // join the two into a big row
-                                var bigrow = {}
-                                for (var k in row0) { bigrow[k] = row0[k]; }
-                                for (var k in row1) { bigrow[k] = row1[k]; }
-                                if (this.doWhere(tables[1].from.on, bigrow, true)) {
-                                    rows.push(bigrow);
+                            for (let row0 of tables[0].rows) {
+                                for (let row1 of tables[1].rows) {
+                                    // join the two into a big row
+                                    var bigrow = {}
+                                    for (var k in row0) { bigrow[k] = row0[k]; }
+                                    for (var k in row1) { bigrow[k] = row1[k]; }
+                                    if (this.doWhere(tables[1].from.on, bigrow, true)) {
+                                        rows.push(bigrow);
+                                    }
                                 }
                             }
+                            tables[0].rows = rows;
                         }
-                        tables[0].rows = rows;
+                        break;
+                    case 'LEFT JOIN':
+                        {
+                            var rows = [];
+
+                            // join all 
+                            let left = tables[0].rows.map(row => {
+                                return { used: false, row: row };
+                            });
+                            let right = tables[1].rows.map(row => {
+                                return { used: false, row: row };
+                            });
+
+                            for (let leftRow of left) {
+
+                                for (let rightRow of right) {
+                                    var bigrow = {}
+                                    for (var k in leftRow.row) { bigrow[k] = leftRow.row[k]; }
+                                    for (var k in rightRow.row) { bigrow[k] = rightRow.row[k]; }
+                                    if (this.doWhere(tables[1].from.on, bigrow, true)) {
+                                        rows.push(bigrow);
+                                        leftRow.used = true;
+                                        rightRow.used = true;
+                                    }
+                                }
+                            }
+
+                            left.filter(leftRow => leftRow.used == false).map(leftRow => rows.push(leftRow.row));
+                            tables[0].rows = rows;
+                        }
+                        break;
+                    case 'RIGHT JOIN':
+                        {
+                            var rows = [];
+
+                            // join all 
+                            let left = tables[0].rows.map(row => {
+                                return { used: false, row: row };
+                            });
+                            let right = tables[1].rows.map(row => {
+                                return { used: false, row: row };
+                            });
+
+                            for (let leftRow of left) {
+
+                                for (let rightRow of right) {
+                                    var bigrow = {}
+                                    for (var k in leftRow.row) { bigrow[k] = leftRow.row[k]; }
+                                    for (var k in rightRow.row) { bigrow[k] = rightRow.row[k]; }
+                                    if (this.doWhere(tables[1].from.on, bigrow, true)) {
+                                        rows.push(bigrow);
+                                        leftRow.used = true;
+                                        rightRow.used = true;
+                                    }
+                                }
+                            }
+
+                            right.filter(rightRow => rightRow.used == false).map(rightRow => rows.push(rightRow.row));
+                            tables[0].rows = rows;
+                        }
+                        break;
+                    case 'FULL JOIN':
+                        {                   
+                            var rows = [];
+
+                            // join all 
+                            let left = tables[0].rows.map(row => {
+                                return { used: false, row: row };
+                            });
+                            let right = tables[1].rows.map(row => {
+                                return { used: false, row: row };
+                            });
+
+                            for (let leftRow of left) {
+
+                                for (let rightRow of right) {
+                                    var bigrow = {}
+                                    for (var k in leftRow.row) { bigrow[k] = leftRow.row[k]; }
+                                    for (var k in rightRow.row) { bigrow[k] = rightRow.row[k]; }
+                                    if (this.doWhere(tables[1].from.on, bigrow, true)) {
+                                        rows.push(bigrow);
+                                        leftRow.used = true;
+                                        rightRow.used = true;
+                                    }
+                                }
+                            }
+
+                            left.filter(leftRow => leftRow.used == false).map(leftRow => rows.push(leftRow.row));
+                            right.filter(rightRow => rightRow.used == false).map(rightRow => rows.push(rightRow.row));
+                            
+                            tables[0].rows = rows;
+                        }
                         break;
                 }
                 tables.splice(1,1);
@@ -521,7 +618,11 @@ class LocalStorageDb {
 
     execute(sql) {
         return new Promise((resolve, reject) => {
-            resolve(this.parse(sql));
+            try {
+                resolve(this.parse(sql));
+            } catch (err) {
+                reject(err);
+            }
         });
     }
 
