@@ -10,9 +10,13 @@
     "type": "git",
     "url": "git+https://github.com/mlaanderson/database-js-localstorage.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "database-js",
+    "localstorage",
+    "browser"
+  ],
+  "author": "Michael Anderson",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/mlaanderson/database-js-localstorage/issues"
   },
