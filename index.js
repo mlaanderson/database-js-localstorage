@@ -1,4 +1,4 @@
-var storage = localStorage || require('./localstorage');
+var storage = typeof localStorage === "undefined" ? require('./localstorage') : localStorage
 var { parse} = require('node-sqlparser');
 
 class LocalStorageDb {
@@ -123,24 +123,28 @@ class LocalStorageDb {
         }
     }
 
-    getMappedRows(table) {
+    getMappedRows(table, namespace = false) {
         let rows = this.getRows(table);
         let def = this.getTableDefinition(table);
 
         return rows.map(row => {
             var row_data = {};
             for (let key in def) {
-                row_data[key] = row[def[key].index];
+                let skey = namespace ? namespace + '.' + key : key;
+                row_data[skey] = row[def[key].index];
             }
             return row_data;
         });
     }
 
-    doWhere(where, row) {
+    doWhere(where, row, namespace = false) {
         if (where === null) return true;
 
-        var getVal = (obj) => {
-            if (obj.type === "column_ref") return row[obj.column];
+        var getVal = (obj) => { 
+            if (obj.type === "column_ref") {
+                let field = namespace ? obj.table + "." + obj.column : obj.column
+                return row[field];
+            }
             if (obj.type === "binary_expr") return this.doWhere(obj, row);
             return obj.value;
         }
@@ -208,7 +212,7 @@ class LocalStorageDb {
      * @returns 
      * @memberof Firebase
      */
-    chooseFields(sqlObj, data, row) {
+    chooseFields(sqlObj, data, row, namespace = false) {
         if (sqlObj.columns === "*") {
             data.push(row);
             return;
@@ -217,10 +221,6 @@ class LocalStorageDb {
         let isAggregate = sqlObj.columns.some((col) => { return col.expr.type === 'aggr_func'; });
 
         if (isAggregate === true) {
-            // if (data.length === 0) {
-            //     data.push({});
-            // }
-
             var groupby = () => {
                 if (sqlObj.groupby == null) return 0;
                 let result = data.findIndex(drow => {
@@ -236,7 +236,7 @@ class LocalStorageDb {
             var index = groupby();
 
             for (let col of sqlObj.columns) {
-                let name, data_row;
+                let name;
                 switch(col.expr.type) {
                     case 'column_ref':
                         name = col.as || col.expr.column;
@@ -265,8 +265,8 @@ class LocalStorageDb {
         } else {
             let result = {};
             for (let col of sqlObj.columns) {
-                let name = col.as || col.expr.column;
-                result[name] = row[col.expr.column];
+                let name = col.as || (namespace ? col.expr.table + "." + col.expr.column : col.expr.column);
+                result[name] = row[namespace ? col.expr.table + "." + col.expr.column : col.expr.column];
             }
             data.push(result);
         }
@@ -381,9 +381,42 @@ class LocalStorageDb {
 
         storage.setItem(table_prefix + ".rows", JSON.stringify(table));
     }
-    
-    doReplace() {
-    
+
+    doSingleSelect(sqlobj, rows, namespace = false) {
+        let result = [];
+        
+        rows = rows.filter(row => this.doWhere(sqlobj.where, row, namespace));
+        rows.map(row => this.chooseFields(sqlobj, result, row, namespace));
+
+        if (sqlobj.orderby) {
+            result.sort((a, b) => {
+                for (let orderer of sqlobj.orderby) {
+                    let column = namespace ? orderer.expr.table + "." + orderer.expr.column : orderer.expr.column;
+                    if (orderer.expr.type !== 'column_ref') {
+                        throw new Error("ORDER BY only supported for columns, aggregates are not supported");
+                    }
+
+                    if (a[column] > b[column]) {
+                        return orderer.type == 'ASC' ? 1 : -1;
+                    }
+                    if (a[column] < b[column]) {
+                        return orderer.type == 'ASC' ? -1 : 1;
+                    }
+                }
+                return 0;
+            });
+        }
+
+        if (sqlobj.limit) {
+            if (sqlobj.limit.length !== 2) {
+                throw new Error("Invalid LIMIT expression: Use LIMIT [offset,] number");
+            }
+            let offs = parseInt(sqlobj.limit[0].value);
+            let len = parseInt(sqlobj.limit[1].value);
+            result = result.slice(offs, offs + len);
+        }
+
+        return result;
     }
 
     /**
@@ -396,42 +429,49 @@ class LocalStorageDb {
     doSelect(sqlobj) {
         if (sqlobj.from.length == 1) {
             let table = this.getPrefix(sqlobj.from[0]);
-            let result = [];
-
-            let rows = this.getMappedRows(table).filter(row => this.doWhere(sqlobj.where, row)); //.map(row => this.chooseFields(sqlobj, [], row));
-
-            rows.map(row => this.chooseFields(sqlobj, result, row));
-
-            if (sqlobj.orderby) {
-                result.sort((a, b) => {
-                    for (let orderer of sqlobj.orderby) {
-                        if (orderer.expr.type !== 'column_ref') {
-                            throw new Error("ORDER BY only supported for columns, aggregates are not supported");
-                        }
-
-                        if (a[orderer.expr.column] > b[orderer.expr.column]) {
-                            return orderer.type == 'ASC' ? 1 : -1;
-                        }
-                        if (a[orderer.expr.column] < b[orderer.expr.column]) {
-                            return orderer.type == 'ASC' ? -1 : 1;
-                        }
-                    }
-                    return 0;
-                });
-            }
-
-            if (sqlobj.limit) {
-                if (sqlobj.limit.length !== 2) {
-                    throw new Error("Invalid LIMIT expression: Use LIMIT [offset,] number");
-                }
-                let offs = parseInt(sqlobj.limit[0].value);
-                let len = parseInt(sqlobj.limit[1].value);
-                result = result.slice(offs, offs + len);
-            }
+            let result = this.doSingleSelect(sqlobj, this.getMappedRows(table));
 
             return result;
         } else {
             // joins not complete
+            let tables = [];
+            
+            for (let n = 0; n < sqlobj.from.length; n++) {
+                var table = this.getPrefix(sqlobj.from[n]);
+                var from = sqlobj.from[n];
+                let rows = this.getMappedRows(table, sqlobj.from[n].table);
+                
+                tables.push({ table: table, name: sqlobj.from[n].table, rows: rows, from: sqlobj.from[n] });
+            }
+
+            while (tables.length > 1) {
+                // take the second table and merge it into the first according to the join rules
+                switch(tables[1].from.join) {
+                    case 'INNER JOIN':
+                        // keep only the matches
+                        var rows = [];
+
+                        for (let row0 of tables[0].rows) {
+                            for (let row1 of tables[1].rows) {
+                                // join the two into a big row
+                                var bigrow = {}
+                                for (var k in row0) { bigrow[k] = row0[k]; }
+                                for (var k in row1) { bigrow[k] = row1[k]; }
+                                if (this.doWhere(tables[1].from.on, bigrow, true)) {
+                                    rows.push(bigrow);
+                                }
+                            }
+                        }
+                        tables[0].rows = rows;
+                        break;
+                }
+                tables.splice(1,1);
+            }
+
+            // the join has been performed, now this is a big table treat it as such
+            let result = this.doSingleSelect(sqlobj, tables[0].rows, true);
+
+            return result;
         }
     }
     
@@ -462,7 +502,7 @@ class LocalStorageDb {
 
         
         switch(sqlobj.type) {
-            case 'create_table':
+            case 'create_table': 
                 return this.doCreate(sqlobj);
             case 'insert':
                 return this.doInsert(sqlobj);
