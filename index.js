@@ -222,7 +222,12 @@ class LocalStorageDb {
 
         if (isAggregate === true) {
             var groupby = () => {
-                if (sqlObj.groupby == null) return 0;
+                if (sqlObj.groupby == null) {
+                    if (data.length < 1) {
+                        data.push({});
+                    }
+                    return 0
+                };
                 let result = data.findIndex(drow => {
                     return sqlObj.groupby.every(group => drow[group.column] == row[group.column]);
                 });
