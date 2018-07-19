@@ -1,6 +1,6 @@
 {
   "name": "database-js-localstorage",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Database driver that uses localstorage as a table storage mechanism",
   "main": "index.js",
   "scripts": {
