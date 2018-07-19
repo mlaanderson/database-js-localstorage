@@ -387,44 +387,6 @@ class LocalStorageDb {
 
         storage.setItem(table_prefix + ".rows", JSON.stringify(table));
     }
-
-    doSingleSelect(sqlobj, rows, namespace = false) {
-        let result = [];
-        
-        rows = rows.filter(row => this.doWhere(sqlobj.where, row, namespace));
-
-        if (sqlobj.orderby) {
-            rows.sort((a, b) => {
-                for (let orderer of sqlobj.orderby) {
-                    let column = namespace ? orderer.expr.table + "." + orderer.expr.column : orderer.expr.column;
-                    if (orderer.expr.type !== 'column_ref') {
-                        throw new Error("ORDER BY only supported for columns, aggregates are not supported");
-                    }
-
-                    if (a[column] > b[column]) {
-                        return orderer.type == 'ASC' ? 1 : -1;
-                    }
-                    if (a[column] < b[column]) {
-                        return orderer.type == 'ASC' ? -1 : 1;
-                    }
-                }
-                return 0;
-            });
-        }
-
-        rows.map(row => this.chooseFields(sqlobj, result, row, namespace));
-
-        if (sqlobj.limit) {
-            if (sqlobj.limit.length !== 2) {
-                throw new Error("Invalid LIMIT expression: Use LIMIT [offset,] number");
-            }
-            let offs = parseInt(sqlobj.limit[0].value);
-            let len = parseInt(sqlobj.limit[1].value);
-            result = result.slice(offs, offs + len);
-        }
-
-        return result;
-    }
     
     join(dest, src, query, includeAllDest, includeAllSrc, namespace = false) {
         var rows = [];
@@ -500,7 +462,39 @@ class LocalStorageDb {
         }
 
         // the join has been performed, now this is a big table treat it as such
-        let result = this.doSingleSelect(sqlobj, tables[0].rows, namespace);
+        let result = [];
+        
+        let resultRows = tables[0].rows.filter(row => this.doWhere(sqlobj.where, row, namespace));
+
+        if (sqlobj.orderby) {
+            resultRows.sort((a, b) => {
+                for (let orderer of sqlobj.orderby) {
+                    let column = namespace ? orderer.expr.table + "." + orderer.expr.column : orderer.expr.column;
+                    if (orderer.expr.type !== 'column_ref') {
+                        throw new Error("ORDER BY only supported for columns, aggregates are not supported");
+                    }
+
+                    if (a[column] > b[column]) {
+                        return orderer.type == 'ASC' ? 1 : -1;
+                    }
+                    if (a[column] < b[column]) {
+                        return orderer.type == 'ASC' ? -1 : 1;
+                    }
+                }
+                return 0;
+            });
+        }
+
+        resultRows.map(row => this.chooseFields(sqlobj, result, row, namespace));
+
+        if (sqlobj.limit) {
+            if (sqlobj.limit.length !== 2) {
+                throw new Error("Invalid LIMIT expression: Use LIMIT [offset,] number");
+            }
+            let offs = parseInt(sqlobj.limit[0].value);
+            let len = parseInt(sqlobj.limit[1].value);
+            result = result.slice(offs, offs + len);
+        }
 
         return result;
     }
