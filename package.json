@@ -25,6 +25,6 @@
     "database-js": "^3.0.7"
   },
   "dependencies": {
-    "node-sqlparser": "^1.0.4"
+    "database-js-sqlparser": "^1.0.0"
   }
 }
