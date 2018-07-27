@@ -70,7 +70,7 @@ class LocalStorageDb extends AbstractDriver {
         try {
             return JSON.parse(storage.getItem(table + ".rows"));
         } catch (e) {
-            return null;
+            return [];
         }
     }
 
